@@ -26,8 +26,9 @@ var/
 # Virtual environments
 .venv/
 venv/
-env/
+env/ 
 ENV/
+.env
 
 # Pytest
 .cache/
