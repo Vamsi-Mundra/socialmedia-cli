@@ -147,16 +147,16 @@ def login(platform: str) -> None:
             print(f"Tokens saved to {TOKEN_PATH}")
             
             # Wait and run smoke test
-            print("\nWaiting 60 seconds before running a test post...")
-            time.sleep(60)
-            print("Posting test tweet...")
+            # print("\nWaiting 60 seconds before running a test post...")
+            # time.sleep(60)
+            # print("Posting test tweet...")
             
-            try:
-                tweet_id, tweet_url = twitter.post_tweet("Hello to my workld!!")
-                print(f"✅ Test successful! Tweet posted: {tweet_url}")
-            except Exception as e:
-                print(f"⚠️  Test post failed: {e}")
-                print("You can still try posting manually with: socialmedia-cli post twitter 'your message'")
+            # try:
+            #     tweet_id, tweet_url = twitter.post_tweet("Hello to my workld!!")
+            #     print(f"✅ Test successful! Tweet posted: {tweet_url}")
+            # except Exception as e:
+            #     print(f"⚠️  Test post failed: {e}")
+            #     print("You can still try posting manually with: socialmedia-cli post twitter 'your message'")
                 
         except tweepy.TweepyException as e:
             raise Exception(f"Failed to complete authentication: {e}")
