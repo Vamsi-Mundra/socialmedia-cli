@@ -9,6 +9,7 @@ from . import auth, api
 import typer
 from pathlib import Path
 from .core.logging import get_logger
+from .core.config import get_config_value
 
 from .pipelines.daily_digest import run
 from .drafts.manager import list_drafts, load
@@ -85,13 +86,20 @@ def post_text(
 @app.command()
 def digest(
     topic: str = typer.Argument(..., help="Topic to generate digest for"),
-    hours: int = typer.Option(24, help="Hours to look back"),
-    tweets: int = typer.Option(5, help="Number of tweets to generate"),
-    chars: int = typer.Option(240, help="Maximum characters per tweet"),
-    provider: str = typer.Option("groq", help="LLM provider to use"),
-    model: str = typer.Option("mixtral-8x7b-internet", help="LLM model to use")
+    hours: int = typer.Option(None, help="Hours to look back"),
+    tweets: int = typer.Option(None, help="Number of tweets to generate"),
+    chars: int = typer.Option(None, help="Maximum characters per tweet"),
+    provider: str = typer.Option(None, help="LLM provider to use"),
+    model: str = typer.Option(None, help="LLM model to use")
 ):
     """Generate a daily digest of tweets for a topic."""
+    # Use configuration defaults if not provided
+    hours = hours or get_config_value('cli.default_hours')
+    tweets = tweets or get_config_value('cli.default_tweets')
+    chars = chars or get_config_value('cli.default_chars')
+    provider = provider or get_config_value('llm.default_provider')
+    model = model or get_config_value('llm.default_model')
+    
     logger.info(f"Starting digest: topic={topic}, hours={hours}, tweets={tweets}, chars={chars}, provider={provider}, model={model}")
     try:
         path = run(topic, hours, tweets, chars, provider, model)

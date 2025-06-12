@@ -5,7 +5,7 @@ from typing import Dict, Any
 import requests
 
 from ..base import BaseLLM, register
-from ...core.config import get_api_key
+from ...core.config import get_api_key, get_config_value
 from ...core.errors import LLMError
 from ...core.logging import get_logger
 
@@ -22,7 +22,7 @@ class GroqLLM(BaseLLM):
             logger.error("GROQ_API_KEY not found in environment or config")
             raise LLMError("GROQ_API_KEY not found in environment or config")
         
-        self.api_url = "https://api.groq.com/openai/v1/chat/completions"
+        self.api_url = get_config_value('llm.providers.groq.api_url')
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"

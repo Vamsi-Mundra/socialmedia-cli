@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 from typing import Tuple
 from requests_oauthlib import OAuth1Session
+from ..core.logging import get_logger
+
+logger = get_logger("twitter")
 
 TOKEN_PATH = Path.home() / ".socialmedia_cli_tokens.json"
 
@@ -64,12 +67,12 @@ def post_tweet(text: str) -> Tuple[str, str]:
         tweet_id = json_response['data']['id']
         tweet_url = f"https://twitter.com/user/status/{tweet_id}"
         
-        # Print success message
-        print(f"Successfully posted tweet!")
-        print(f"Tweet URL: {tweet_url}")
+        # Log success message
+        logger.info("Successfully posted tweet!")
+        logger.info(f"Tweet URL: {tweet_url}")
         
         return tweet_id, tweet_url
 
     except Exception as e:
-        print(f"Error posting tweet: {str(e)}")
+        logger.error(f"Error posting tweet: {str(e)}")
         raise ValueError(f"Failed to post tweet: {str(e)}") 

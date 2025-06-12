@@ -5,6 +5,7 @@ Authentication module for social media platforms.
 import json
 import os
 import time
+import socket
 from pathlib import Path
 from typing import Dict, Tuple
 import tweepy
@@ -13,11 +14,36 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import webbrowser
 from .components import twitter
+from .core.config import get_config_value
+from .core.logging import get_logger
 
-TOKEN_PATH = Path.home() / ".socialmedia_cli_tokens.json"
-TOKEN_MODE = 0o600
-CALLBACK_PORT = 8000
-CALLBACK_URL = f"http://localhost:{CALLBACK_PORT}/callback"
+logger = get_logger("auth")
+
+# Get configuration values
+TOKEN_PATH = Path(get_config_value('auth.token_path'))
+TOKEN_MODE = int(get_config_value('auth.token_mode'), 8)  # Convert string to octal
+CALLBACK_PORT = get_config_value('auth.callback_port')
+CALLBACK_URL = get_config_value('auth.callback_url')
+AUTH_TIMEOUT = get_config_value('auth.auth_timeout')
+POLLING_INTERVAL = get_config_value('auth.polling_interval')
+
+def is_port_available(port: int) -> bool:
+    """Check if a port is available."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('localhost', port))
+            return True
+        except OSError:
+            return False
+
+def wait_for_server(port: int, timeout: int = 5) -> bool:
+    """Wait for server to be ready."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not is_port_available(port):
+            return True
+        time.sleep(0.1)
+    return False
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     """Handle OAuth callback and store the verifier."""
@@ -29,6 +55,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             # Parse the callback URL
             query = parse_qs(urlparse(self.path).query)
             OAuthCallbackHandler.verifier = query.get('oauth_verifier', [None])[0]
+            logger.debug(f"Received OAuth callback with verifier: {OAuthCallbackHandler.verifier}")
             
             # Send success response
             self.send_response(200)
@@ -54,17 +81,17 @@ def get_twitter_credentials() -> tuple[str, str]:
     consumer_secret = os.environ.get("TWITTER_CONSUMER_SECRET")
     
     if not consumer_key or not consumer_secret:
-        print("\nTo use Twitter, you need to set up API credentials:")
-        print("1. Go to https://developer.twitter.com/en/portal/dashboard")
-        print("2. Create a new app or use an existing one")
-        print("3. Get your API Key (Consumer Key) and API Secret (Consumer Secret)")
-        print("4. In User authentication settings:")
-        print(f"   - Enable OAuth 1.0a")
-        print(f"   - Set callback URL to: {CALLBACK_URL}")
-        print("\nThen set them as environment variables:")
-        print("export TWITTER_CONSUMER_KEY='your_consumer_key'")
-        print("export TWITTER_CONSUMER_SECRET='your_consumer_secret'")
-        print("\nOr enter them now (they will be used only for this session):")
+        logger.info("\nTo use Twitter, you need to set up API credentials:")
+        logger.info("1. Go to https://developer.twitter.com/en/portal/dashboard")
+        logger.info("2. Create a new app or use an existing one")
+        logger.info("3. Get your API Key (Consumer Key) and API Secret (Consumer Secret)")
+        logger.info("4. In User authentication settings:")
+        logger.info(f"   - Enable OAuth 1.0a")
+        logger.info(f"   - Set callback URL to: {CALLBACK_URL}")
+        logger.info("\nThen set them as environment variables:")
+        logger.info("export TWITTER_CONSUMER_KEY='your_consumer_key'")
+        logger.info("export TWITTER_CONSUMER_SECRET='your_consumer_secret'")
+        logger.info("\nOr enter them now (they will be used only for this session):")
         consumer_key = input("Enter your Twitter API Key (Consumer Key): ").strip()
         consumer_secret = input("Enter your Twitter API Secret (Consumer Secret): ").strip()
     
@@ -72,11 +99,43 @@ def get_twitter_credentials() -> tuple[str, str]:
 
 def start_callback_server() -> HTTPServer:
     """Start a local server to handle the OAuth callback."""
+    if not is_port_available(CALLBACK_PORT):
+        raise Exception(f"Port {CALLBACK_PORT} is already in use. Please choose a different port.")
+    
     server = HTTPServer(('localhost', CALLBACK_PORT), OAuthCallbackHandler)
     thread = threading.Thread(target=server.serve_forever)
     thread.daemon = True
     thread.start()
+    
+    # Wait for server to be ready
+    if not wait_for_server(CALLBACK_PORT):
+        server.shutdown()
+        raise Exception(f"Failed to start server on port {CALLBACK_PORT}")
+    
+    logger.debug(f"Callback server started on port {CALLBACK_PORT}")
     return server
+
+def shutdown_server(server: HTTPServer, timeout: int = 5) -> None:
+    """Shutdown the server with a timeout."""
+    logger.info("Initiating server shutdown...")
+    shutdown_start = time.time()
+    
+    # Create a thread to handle the shutdown
+    def shutdown_thread():
+        server.shutdown()
+        server.server_close()
+    
+    shutdown_thread = threading.Thread(target=shutdown_thread)
+    shutdown_thread.daemon = True
+    shutdown_thread.start()
+    
+    # Wait for shutdown to complete with timeout
+    shutdown_thread.join(timeout)
+    if shutdown_thread.is_alive():
+        logger.warning(f"Server shutdown timed out after {timeout} seconds")
+    else:
+        shutdown_time = time.time() - shutdown_start
+        logger.info(f"Server shutdown completed in {shutdown_time:.2f} seconds")
 
 def login(platform: str) -> None:
     """
@@ -93,10 +152,19 @@ def login(platform: str) -> None:
         raise ValueError(f"Unsupported platform: {platform}")
     
     try:
+        start_time = time.time()
+        logger.info("Starting authentication process...")
+        
+        # Start callback server first
+        logger.info("Starting local server to handle authentication...")
+        server = start_callback_server()
+        
         # Get Twitter API credentials
+        logger.info("Getting Twitter credentials...")
         consumer_key, consumer_secret = get_twitter_credentials()
         
         # Initialize OAuth handler
+        logger.info("Initializing OAuth handler...")
         auth = tweepy.OAuth1UserHandler(
             consumer_key, 
             consumer_secret,
@@ -104,32 +172,46 @@ def login(platform: str) -> None:
         )
         
         try:
-            # Start callback server
-            print("\nStarting local server to handle authentication...")
-            server = start_callback_server()
-            
             # Get request token and authorization URL
+            logger.info("Getting authorization URL...")
             redirect_url = auth.get_authorization_url()
-            print(f"\nOpening browser for Twitter authorization...")
+            logger.info("Opening browser for Twitter authorization...")
             webbrowser.open(redirect_url)
             
-            print("\nWaiting for Twitter callback...")
+            logger.info("Waiting for Twitter callback...")
             # Wait for callback with timeout
-            timeout = 120  # 2 minutes
-            start_time = time.time()
+            callback_start_time = time.time()
+            last_log_time = callback_start_time
             while not OAuthCallbackHandler.verifier:
-                if time.time() - start_time > timeout:
-                    server.shutdown()
+                current_time = time.time()
+                if current_time - callback_start_time > AUTH_TIMEOUT:
+                    shutdown_server(server)
                     raise Exception("Authentication timed out. Please try again.")
-                time.sleep(1)
+                
+                # Log progress every 5 seconds
+                if current_time - last_log_time >= 5:
+                    elapsed = int(current_time - callback_start_time)
+                    logger.info(f"Still waiting for callback... ({elapsed}s elapsed)")
+                    last_log_time = current_time
+                
+                time.sleep(POLLING_INTERVAL)
+            
+            callback_time = time.time() - callback_start_time
+            logger.info(f"Received callback after {callback_time:.2f} seconds")
             
             # Shutdown server
-            server.shutdown()
+            shutdown_server(server)
             
             # Exchange for access token
+            logger.info("Exchanging verifier for access token...")
+            token_start_time = time.time()
             auth.get_access_token(OAuthCallbackHandler.verifier)
+            token_time = time.time() - token_start_time
+            logger.info(f"Token exchange completed in {token_time:.2f} seconds")
             
             # Save tokens
+            logger.info("Saving tokens...")
+            save_start_time = time.time()
             tokens = {
                 "twitter": {
                     "access_token": auth.access_token,
@@ -142,23 +224,19 @@ def login(platform: str) -> None:
             with open(TOKEN_PATH, "w") as f:
                 json.dump(tokens, f, indent=2)
             os.chmod(TOKEN_PATH, TOKEN_MODE)
+            save_time = time.time() - save_start_time
+            logger.info(f"Tokens saved in {save_time:.2f} seconds")
             
-            print(f"\n✅ Authentication successful!")
-            print(f"Tokens saved to {TOKEN_PATH}")
+            total_time = time.time() - start_time
+            logger.info(f"Authentication successful! (took {total_time:.2f}s)")
+            logger.info(f"Breakdown:")
+            logger.info(f"- Callback wait time: {callback_time:.2f}s")
+            logger.info(f"- Token exchange time: {token_time:.2f}s")
+            logger.info(f"- Token save time: {save_time:.2f}s")
+            logger.info(f"Tokens saved to {TOKEN_PATH}")
             
-            # Wait and run smoke test
-            # print("\nWaiting 60 seconds before running a test post...")
-            # time.sleep(60)
-            # print("Posting test tweet...")
-            
-            # try:
-            #     tweet_id, tweet_url = twitter.post_tweet("Hello to my workld!!")
-            #     print(f"✅ Test successful! Tweet posted: {tweet_url}")
-            # except Exception as e:
-            #     print(f"⚠️  Test post failed: {e}")
-            #     print("You can still try posting manually with: socialmedia-cli post twitter 'your message'")
-                
         except tweepy.TweepyException as e:
+            shutdown_server(server)
             raise Exception(f"Failed to complete authentication: {e}")
             
     except Exception as e:
