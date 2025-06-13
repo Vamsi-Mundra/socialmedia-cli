@@ -1,11 +1,14 @@
 """OpenAI provider implementation with optional web-search support.
 
-2025-06-13 – Patch
-------------------
-* Fixes 400 error when model does not support the hosted *web_search_preview* tool.
-* Makes LLM parsing reliable by forcing the nested prompt to ask for **strict JSON**.
-* Changes tweet size requirement to **550-700 characters** (was “600-700 words”).
-* Keeps every public method & external behaviour unchanged.
+2025-06-13 – Patch 3
+--------------------
+* **generate_tweets** now *prepends a strict instruction block* that re-states:
+  – tweet count, 550-700 character limit, 2-paragraph format  
+  – mandatory `Source:` + `Image Prompt:` lines  
+  – requirement to use the **latest available facts**  
+  – JSON-only return schema  
+  It also enables web-search by default so the model can pull real-time data.
+* Other public APIs are unchanged.
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ class OpenAILLM(BaseLLM):
 
     # ---------------------------------------------------------------- LL helpers
     def _call_llm(self, prompt: str, *, web_search: bool = False):
-        """Centralised call so ‘tools’ logic lives in one place."""
+        """Centralised call; adds hosted tool only when requested."""
         tools = [{"type": "web_search_preview"}] if web_search else None
         return self.client.responses.create(model=self.model, input=prompt, tools=tools)
 
@@ -52,39 +55,20 @@ class OpenAILLM(BaseLLM):
         requirements: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Return a *second-level* prompt that another LLM will use to write tweets.
-
-        Key guarantees:
-        • Exactly 3 tweets, each **550-700 characters**.
-        • The tweet-writing LLM must answer with *only* a JSON list like:
-          [
-            { "text": "…" },
-            { "text": "…" },
-            { "text": "…" }
-          ]
+        Build a *second-level* prompt focussed on resources / context.
+        Structure specifics are enforced later in `generate_tweets`.
         """
         base_prompt = f"""You are a social-media expert and compelling storyteller.
 
-Your task: write a prompt that will instruct **another LLM** to draft **exactly 3 tweets**
-about the live event **{topic}** happening right now.
+Write a prompt that will instruct **another LLM** to cover the live event
+**{topic}** happening right now.
 
-The prompt you output **must**:
+Your prompt must describe:
 
-1. **Set context & tone** – live, real-time, voice = professional yet quirky.
-2. **Specify number of tweets** – exactly three.
-3. **List real-world resources** – live scorecards, official feeds, hashtags, etc.
-4. **Define structure & length** – each tweet must be **550-700 characters** long
-   (≈ two short paragraphs, thread-style, readable).
-5. **Include style guidelines** – 1-2 topical hashtags already inside each tweet,
-   vivid metaphors, avoid clichés.
-6. **Ask for an `Image Prompt:` line** after every tweet describing a fitting graphic.
-7. **Output format** – instruct the LLM to answer with **only** a valid JSON array:
-[
-  {{ "text": "first tweet 550-700 chars…" }},
-  {{ "text": "second tweet 550-700 chars…" }},
-  {{ "text": "third tweet 550-700 chars…" }}
-]
-No markdown fences, no extra keys, no commentary."""
+• The overall context & tone (real-time, professional-yet-quirky).  
+• Where to pull facts (live scorecards, official feeds, trending hashtags, player stats).  
+• A reminder that final tweets will be formatted & length-restricted (details provided
+  later)."""
 
         if requirements:
             base_prompt += (
@@ -99,8 +83,39 @@ No markdown fences, no extra keys, no commentary."""
 
     # ------------------------------------------------------------ Tweet creator
     def generate_tweets(self, prompt: str, num_tweets: int = 3) -> List[Dict[str, str]]:
-        """Call the LLM and return `[{{'text': …}}, …]`."""
-        resp = self._call_llm(prompt, web_search=False)
+        """
+        Execute the *tweet-writing* prompt, adding a strict instruction block so the
+        model knows the exact format/length and to fetch the latest information.
+        """
+        instruction_block = f"""
+================= TWEET OUTPUT REQUIREMENTS (READ CAREFULLY) =================
+
+Write **exactly {num_tweets} tweets** that conform to ALL of these rules:
+
+1. **Length:** 550-700 words each (≈ two short paragraphs). Do *not* exceed.
+2. **Structure:**  
+   Paragraph 1 – compelling hook / play-by-play.  
+   Paragraph 2 – insight, analysis, or witty context.  
+   Then add one blank line, followed by:  
+      Source: <URL you actually used>  
+      Image Prompt: <one-line illustration description>
+3. **Hashtags:** Weave 1-2 topical hashtags naturally into the body of each tweet.
+4. **Freshness:** Use the *most up-to-date* information available right now.
+5. **Output:** Return ONLY a valid JSON array, no markdown fences, like:
+
+[
+  {{ "text": "Tweet 1 exactly as above" }},
+  {{ "text": "Tweet 2 …" }},
+  {{ "text": "Tweet 3 …" }}
+]
+
+Any deviation will be considered a failure.
+==============================================================================
+"""
+        full_prompt = f"{prompt}\n\n{instruction_block}"
+
+        # Enable web-search so the model can fetch live facts
+        resp = self._call_llm(full_prompt, web_search=True)
         msg = next((o for o in resp.output if getattr(o, "type", "") == "message"), None)
         if msg is None:
             raise RuntimeError("No assistant message in LLM response")
@@ -164,10 +179,7 @@ No markdown fences, no extra keys, no commentary."""
         response_length: str = "medium",
         **kwargs,
     ):
-        """
-        Generic completion helper (unchanged), but routed through _call_llm
-        so that hosted tool is added only when requested.
-        """
+        """Generic completion helper – routed through _call_llm for tool safety."""
         logger.info("Sending request to OpenAI API:")
         logger.info("Model: %s", self.model)
         logger.info("Prompt: %s...", prompt[:100])
