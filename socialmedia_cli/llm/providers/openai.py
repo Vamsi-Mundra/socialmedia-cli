@@ -1,5 +1,5 @@
 """OpenAI provider implementation with web-enabled completion support."""
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union, Sequence, Optional
 import logging
 import json
 import re
@@ -57,95 +57,131 @@ Format the prompt in a way that can be directly used by another LLM to generate 
             raise Exception(f"Prompt generation error: {str(e)}")
 
     def generate_tweets(self, prompt: str, num_tweets: int = 3) -> List[Dict[str, str]]:
-        """Generate tweets using the provided prompt.
-        
-        Args:
-            prompt: The prompt to use for tweet generation
-            num_tweets: Number of tweets to generate
-            
-        Returns:
-            List[Dict[str, str]]: List of tweets with their associated image prompts
         """
+        Call the LLM, parse a JSON array if present, otherwise fall back to
+        Markdown parsing that is resilient to extra new-lines and *Alt-text:* blocks.
+        """
+        logger = logging.getLogger(__name__)
+
+        resp = self.client.responses.create(
+            model=self.model,
+            input=prompt,
+            tools=[{"type": "web_search_preview"}],
+        )
+        assistant_msg = next(
+            (o for o in resp.output if getattr(o, "type", "") == "message"), None
+        )
+        if assistant_msg is None:
+            raise RuntimeError("Missing assistant message in LLM response")
+
+        raw = assistant_msg.content[0].text.strip()
+
+        # ---------- 1) JSON path ----------
         try:
-            response = self.client.responses.create(
-                model=self.model,
-                input=prompt,
-                tools=[{"type": "web_search_preview"}]
+            cleaned = re.sub(r"^\s*```(?:json)?|```$", "", raw, flags=re.I | re.M).strip()
+            tweets = json.loads(cleaned)
+            if not isinstance(tweets, list):
+                raise ValueError
+        except Exception:
+            # ---------- 2) Markdown fallback ----------
+            block_regex = re.compile(
+                r"\*\*Tweet\s+\d+:\*\*\s*"                          # "**Tweet 1:**"
+                r"(?P<body>.*?)"                                    #   tweet text
+                r"(?:\n\*Image prompt:\s*(?P<img>.*?)\*)?"          # *Image prompt: …*
+                r"(?:\n\*Alt-text:\s*(?P<alt>.*?)\*)?"              # *Alt-text: …*  (optional)
+                r"(?=\n\*\*Tweet\s+\d+:|\Z)",                       # look-ahead for next "**Tweet" or end
+                re.S | re.I,
             )
-            logger.info(f"Response: {response}")
-            
-            # Find the message output in the response
-            message_output = None
-            for output in response.output:
-                if hasattr(output, 'content'):
-                    message_output = output
-                    break
-            
-            if not message_output:
-                raise Exception("No valid message output found in response")
-                
-            # Get the text content from the message
-            content = message_output.content[0].text
-            
-            # Split content into tweets (for now using a simple approach)
-            # TODO: Implement more sophisticated tweet parsing based on the actual response format
-            tweets = []
-            for i in range(num_tweets):
-                tweets.append({
-                    "text": f"Tweet {i+1}: {content[:240]}",  # Truncate to Twitter length
-                    "image_prompt": f"Default image prompt for tweet {i+1}"
-                })
-            
-            return tweets
-            
-        except Exception as e:
-            logger.error(f"Error generating tweets: {str(e)}", exc_info=True)
-            raise Exception(f"Tweet generation error: {str(e)}")
+            tweets = [
+                {
+                    "text": m.group("body").strip(),
+                    "image_prompt": (m.group("img") or "").strip(),
+                    "alt_text": (m.group("alt") or "").strip(),
+                }
+                for m in block_regex.finditer(raw)
+            ]
 
-    def format_for_twitter(self, tweets: List[Dict[str, str]]) -> List[str]:
-        """Format tweets for Twitter posting.
-        
-        Args:
-            tweets: List of tweets with their associated image prompts
-            
-        Returns:
-            List[str]: Formatted tweets ready for Twitter posting
+        # ---------- 3) Normalise + truncate ----------
+        cleaned: List[Dict[str, str]] = []
+        for t in tweets[:num_tweets]:
+            text = t.get("text", "").strip()
+            if len(text) > 280:
+                text = text[:277] + "…"
+            cleaned.append(
+                {
+                    "text": text,
+                    "image_prompt": t.get("image_prompt") or None,
+                    "alt_text": t.get("alt_text") or None,
+                }
+            )
+        if not cleaned:
+            raise RuntimeError("No tweets parsed from LLM output")
+        return cleaned
+
+    def format_for_twitter(
+        self,
+        tweets: List[Dict[str, str]],
+        hashtags: Optional[Sequence[str]] = ("tech", "development"),
+    ) -> List[str]:
         """
-        formatted_tweets = []
-        for tweet in tweets:
-            # Format the tweet text and add any necessary metadata
-            formatted_tweet = f"{tweet['text']}\n\n#tech #development"  # Add relevant hashtags
-            formatted_tweets.append(formatted_tweet)
-        return formatted_tweets
+        Build final tweet bodies.  Hashtags can be a list/tuple or None.
 
-    def generate_and_post_tweets(self, topic: str, requirements: Dict[str, Any] = None) -> List[str]:
-        """Generate and format tweets for a given topic.
-        
-        Args:
-            topic: The topic to generate tweets about
-            requirements: Additional requirements for the tweets
-            
-        Returns:
-            List[str]: Formatted tweets ready for Twitter posting
+        • Ensures each hashtag starts with '#'.
+        • Skips tweets whose text is empty after parsing.
+        • Re-truncates if tags push length > 280.
+        """
+        tag_block = ""
+        if hashtags:
+            tag_block = " ".join(
+                f"#{tag.lstrip('#')}" for tag in hashtags if tag
+            ).strip()
+
+        result = []
+        for t in tweets:
+            body = t["text"].strip()
+            if not body:
+                continue  # defensive: ignore blanks
+
+            full = f"{body}"
+            if tag_block:
+                full += f"\n\n{tag_block}"
+
+            if len(full) > 280:
+                # keep room for newline + tags
+                room = 280 - (len(tag_block) + 2 if tag_block else 0)
+                full = f"{body[: room - 1]}…"
+                if tag_block:
+                    full += f"\n\n{tag_block}"
+
+            result.append(full)
+
+        return result
+
+    def generate_and_post_tweets(
+        self,
+        topic: str,
+        requirements: Union[Dict[str, Any], None] = None,
+        num_tweets: int = 3,
+    ) -> List[str]:
+        """
+        1. Build an LLM prompt (self.generate_prompt does not change).
+        2. Generate `num_tweets` tweets.
+        3. Format for posting.
         """
         try:
-            # Step 1: Generate the prompt
             prompt = self.generate_prompt(topic, requirements)
-            logger.info("Generated prompt successfully")
-            
-            # Step 2: Generate tweets using the prompt
-            tweets = self.generate_tweets(prompt)
-            logger.info(f"Generated {len(tweets)} tweets successfully")
-            
-            # Step 3: Format tweets for Twitter
-            formatted_tweets = self.format_for_twitter(tweets)
-            logger.info("Formatted tweets successfully")
-            
-            return formatted_tweets
-            
+            logger.info("Generated prompt: %s", prompt)
+
+            tweets = self.generate_tweets(prompt, num_tweets=num_tweets)
+            logger.info("Generated %d tweets: %s", len(tweets), json.dumps(tweets, indent=2))
+
+            formatted = self.format_for_twitter(tweets)
+            logger.info("Formatted tweets: %s", json.dumps(formatted, indent=2))
+            return formatted
+
         except Exception as e:
-            logger.error(f"Error in generate_and_post_tweets: {str(e)}", exc_info=True)
-            raise Exception(f"Tweet generation and formatting error: {str(e)}")
+            logger.exception("generate_and_post_tweets failed: %s", str(e))
+            raise
 
     def generate(
         self,
@@ -179,7 +215,7 @@ Format the prompt in a way that can be directly used by another LLM to generate 
             
             # Log response details
             logger.info("Received response from OpenAI API:")
-            print(response)
+            logger.info(json.dumps(response, indent=2))
             return response
             
         except Exception as e:

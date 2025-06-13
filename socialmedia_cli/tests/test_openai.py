@@ -184,10 +184,10 @@ def test_full_flow():
         requirements = {
             "num_tweets": 3,
             "length": "long",
-            "style": "technical",
+            "style": "Quriky",
             "include_images": True,
             "tone": "professional",
-            "target_audience": "developers"
+            "target_audience": "Sports Fans"
         }
         
         # Generate and format tweets
@@ -212,19 +212,19 @@ if __name__ == "__main__":
     # Test individual components
     console = Console()
     
-    # Test prompt generation
-    console.rule("[bold blue]Testing Prompt Generation")
-    prompt = test_prompt_generation()
+    # # Test prompt generation
+    # console.rule("[bold blue]Testing Prompt Generation")
+    # prompt = test_prompt_generation()
     
-    if prompt:
-        # Test tweet generation
-        console.rule("[bold blue]Testing Tweet Generation")
-        tweets = test_tweet_generation(prompt)
+    # if prompt:
+    #     # Test tweet generation
+    #     console.rule("[bold blue]Testing Tweet Generation")
+    #     tweets = test_tweet_generation(prompt)
         
-        if tweets:
-            # Test Twitter formatting
-            console.rule("[bold blue]Testing Twitter Formatting")
-            formatted_tweets = test_twitter_formatting(tweets)
+    #     if tweets:
+    #         # Test Twitter formatting
+    #         console.rule("[bold blue]Testing Twitter Formatting")
+    #         formatted_tweets = test_twitter_formatting(tweets)
     
     # Test full flow
     console.rule("[bold blue]Testing Full Flow")
