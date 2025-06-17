@@ -193,7 +193,7 @@ def test_full_flow():
         # Generate and format tweets
         console.rule("[bold green]Generating and Formatting Tweets")
         formatted_tweets = llm.generate_and_post_tweets(
-            topic="South Africa VS Australia World Test Chamipionship",
+            topic="Y Combinator AI Startup School Which started today.",
             requirements=requirements
         )
         

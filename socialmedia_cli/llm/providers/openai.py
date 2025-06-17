@@ -61,14 +61,13 @@ class OpenAILLM(BaseLLM):
         base_prompt = f"""You are a social-media expert and compelling storyteller.
 
 Write a prompt that will instruct **another LLM** to cover the live event
-**{topic}** happening right now.
+**{topic}** happening right now or happened today.
 
 Your prompt must describe:
 
 • The overall context & tone (real-time, professional-yet-quirky).  
-• Where to pull facts (live scorecards, official feeds, trending hashtags, player stats).  
-• A reminder that final tweets will be formatted & length-restricted (details provided
-  later)."""
+• Where to pull facts regarding the **{topic}** happening right now or happened today.  
+• """
 
         if requirements:
             base_prompt += (
@@ -82,7 +81,7 @@ Your prompt must describe:
         return prompt_text
 
     # ------------------------------------------------------------ Tweet creator
-    def generate_tweets(self, prompt: str, num_tweets: int = 3) -> List[Dict[str, str]]:
+    def generate_tweets(self, prompt: str, num_tweets: int = 1) -> List[Dict[str, str]]:
         """
         Execute the *tweet-writing* prompt, adding a strict instruction block so the
         model knows the exact format/length and to fetch the latest information.
@@ -96,9 +95,6 @@ Write **exactly {num_tweets} tweets** that conform to ALL of these rules:
 2. **Structure:**  
    Paragraph 1 – compelling hook / play-by-play.  
    Paragraph 2 – insight, analysis, or witty context.  
-   Then add one blank line, followed by:  
-      Source: <URL you actually used>  
-      Image Prompt: <one-line illustration description>
 3. **Hashtags:** Weave 1-2 topical hashtags naturally into the body of each tweet.
 4. **Freshness:** Use the *most up-to-date* information available right now.
 5. **Output:** Return ONLY a valid JSON array, no markdown fences, like:
@@ -149,7 +145,7 @@ Any deviation will be considered a failure.
     def format_for_twitter(
         self,
         tweets: List[Dict[str, str]],
-        hashtags: Sequence[str] = ("tech", "development"),
+        hashtags: Sequence[str] = (),
     ) -> List[str]:
         tag_block = " ".join(f"#{tag.lstrip('#')}" for tag in hashtags)
         return [f"{t['text'].rstrip()}\n\n{tag_block}" for t in tweets if t["text"].rstrip()]
