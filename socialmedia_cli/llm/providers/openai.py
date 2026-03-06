@@ -31,6 +31,45 @@ def _strip_json_fence(text: str) -> str:
     return re.sub(r"^\s*```(?:json)?|```$", "", text, flags=re.I | re.M).strip()
 
 
+def _clean_tweet_text(text: str) -> str:
+    """Clean tweet text by removing markdown formatting and normalizing whitespace."""
+    if not text:
+        return ""
+    
+    # Remove markdown formatting
+    cleaned = text
+    
+    # Remove **bold** formatting
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', cleaned)
+    
+    # Remove *italic* formatting  
+    cleaned = re.sub(r'\*(.*?)\*', r'\1', cleaned)
+    
+    # Remove `code` formatting
+    cleaned = re.sub(r'`(.*?)`', r'\1', cleaned)
+    
+    # Remove markdown links [text](url) -> text
+    cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)
+    
+    # Remove image suggestions and alt-text lines
+    cleaned = re.sub(r'\*Image\s+Suggestion:.*?(?=\n\n|$)', '', cleaned, flags=re.I | re.S)
+    cleaned = re.sub(r'\*Alt-text:.*?(?=\n\n|$)', '', cleaned, flags=re.I | re.S)
+    
+    # Normalize whitespace - replace multiple newlines with single newline
+    cleaned = re.sub(r'\n\s*\n', '\n', cleaned)
+    
+    # Replace single newlines with spaces (for paragraph breaks, keep double newlines)
+    cleaned = re.sub(r'(?<!\n)\n(?!\n)', ' ', cleaned)
+    
+    # Clean up extra whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    # Strip leading/trailing whitespace
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
+
 # ─────────────────────────────── Provider ─────────────────────────────────────
 @register("openai")
 class OpenAILLM(BaseLLM):
@@ -134,7 +173,7 @@ Any deviation will be considered a failure.
 
         # 3️⃣  Final clean-up
         for t in tweets:
-            t["text"] = t["text"].strip().strip('"\u201c\u201d')
+            t["text"] = _clean_tweet_text(t["text"])
 
         if not tweets:
             raise RuntimeError("Could not extract tweets from LLM output")
@@ -147,8 +186,26 @@ Any deviation will be considered a failure.
         tweets: List[Dict[str, str]],
         hashtags: Sequence[str] = (),
     ) -> List[str]:
-        tag_block = " ".join(f"#{tag.lstrip('#')}" for tag in hashtags)
-        return [f"{t['text'].rstrip()}\n\n{tag_block}" for t in tweets if t["text"].rstrip()]
+        """Format tweets for Twitter posting with cleaned text and hashtags."""
+        tag_block = " ".join(f"#{tag.lstrip('#')}" for tag in hashtags) if hashtags else ""
+        
+        formatted_tweets = []
+        for t in tweets:
+            if not t.get("text", "").strip():
+                continue
+                
+            # Clean the tweet text
+            clean_text = _clean_tweet_text(t["text"])
+            
+            # Format with hashtags if provided
+            if tag_block:
+                formatted_tweet = f"{clean_text}\n\n{tag_block}"
+            else:
+                formatted_tweet = clean_text
+                
+            formatted_tweets.append(formatted_tweet)
+            
+        return formatted_tweets
 
     # --------------------------------------------------------- High-level flow
     def generate_and_post_tweets(
