@@ -47,4 +47,11 @@ logs/
 # Editor
 .vscode/
 .idea/
-*.swp 
+*.swp
+
+# Node / Next.js
+node_modules/
+.next/
+
+# SQLite database
+socialmedia.db
