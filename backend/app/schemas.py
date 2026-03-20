@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, model_validator
 from typing import Optional
 from datetime import datetime
 
@@ -32,7 +32,17 @@ class TokenResponse(BaseModel):
 
 
 class PostCreate(BaseModel):
-    content: str
+    content: Optional[str] = None
+    topic: Optional[str] = None
+    auto_generate: bool = False
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.auto_generate and not self.topic:
+            raise ValueError("Topic is required when automatic tweet generation is enabled")
+        if not self.auto_generate and not (self.content and self.content.strip()):
+            raise ValueError("Content is required when automatic tweet generation is disabled")
+        return self
 
 
 class PostResponse(BaseModel):
@@ -46,6 +56,21 @@ class PostResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TopicOption(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class TweetDraftRequest(BaseModel):
+    topic: str
+
+
+class TweetDraftResponse(BaseModel):
+    topic: str
+    content: str
 
 
 class TwitterConnectResponse(BaseModel):

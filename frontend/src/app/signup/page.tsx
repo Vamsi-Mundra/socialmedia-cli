@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api } from "@/services/api";
 
 export default function SignUp() {
   const router = useRouter();
@@ -18,7 +18,7 @@ export default function SignUp() {
     setError("");
     setLoading(true);
     try {
-      const data = await api.signup(email, name, password);
+      const data = await api.signup({ email, name, password });
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("user", JSON.stringify(data.user));
       router.push("/dashboard");

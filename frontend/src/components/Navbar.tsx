@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { User } from "@/lib/api";
+import type { User } from "@/services/api";
 
 export default function Navbar({ user }: { user: User }) {
   const router = useRouter();

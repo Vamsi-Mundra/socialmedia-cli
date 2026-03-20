@@ -1,6 +1,6 @@
 "use client";
 
-import type { Post } from "@/lib/api";
+import type { Post } from "@/services/api";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();

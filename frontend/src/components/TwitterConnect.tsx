@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { api, type User } from "@/lib/api";
+import { api, type User } from "@/services/api";
 
 export default function TwitterConnect({
   user,
@@ -40,8 +40,8 @@ export default function TwitterConnect({
 
   if (user.twitter_connected) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center">
               <svg
@@ -55,7 +55,7 @@ export default function TwitterConnect({
             <div>
               <p className="font-medium text-sm">X/Twitter Connected</p>
               {user.twitter_username && (
-                <p className="text-xs text-gray-500">@{user.twitter_username}</p>
+                <p className="text-xs text-gray-500">Posting as @{user.twitter_username}</p>
               )}
             </div>
           </div>
@@ -67,20 +67,21 @@ export default function TwitterConnect({
             Disconnect
           </button>
         </div>
-        {error && (
-          <p className="text-xs text-red-500 mt-2">{error}</p>
-        )}
+        <div className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3 text-xs text-gray-600">
+          This dashboard posts only to the X account that the current signed-in user connected. Any user can sign in, connect their own X account, and publish to their own profile.
+        </div>
+        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
       </div>
     );
   }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <p className="font-medium text-sm">Connect X/Twitter</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            Link your account to start posting
+            Any signed-in user can link their own X account and post directly into that account.
           </p>
         </div>
         <button
@@ -88,19 +89,13 @@ export default function TwitterConnect({
           disabled={loading}
           className="px-4 py-2 text-sm font-medium text-white bg-black rounded-lg hover:bg-gray-800 transition disabled:opacity-50 flex items-center gap-2"
         >
-          <svg
-            className="w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-          >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
           </svg>
           {loading ? "Connecting..." : "Connect"}
         </button>
       </div>
-      {error && (
-        <p className="text-xs text-red-500 mt-3">{error}</p>
-      )}
+      {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
     </div>
   );
 }

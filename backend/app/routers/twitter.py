@@ -70,7 +70,7 @@ def twitter_callback(oauth_token: str, oauth_verifier: str, db: Session = Depend
 
     try:
         access_token, access_token_secret = auth.get_access_token(oauth_verifier)
-    except tweepy.TweepyException as e:
+    except tweepy.TweepyException:
         return RedirectResponse(url=f"{FRONTEND_URL}/dashboard?twitter=error&message=Token+exchange+failed")
 
     # Fetch Twitter username
