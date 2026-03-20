@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api, type User, type Post } from "@/lib/api";
+import { api, type User, type Post } from "@/services/api";
 import Navbar from "@/components/Navbar";
 import TwitterConnect from "@/components/TwitterConnect";
 import PostComposer from "@/components/PostComposer";
